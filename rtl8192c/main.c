@@ -11,10 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -39,10 +35,10 @@
 
 
 MODULE_AUTHOR( "lizhaoming	<chaoming_li@realsil.com.cn>" );
+MODULE_AUTHOR( "Benjamin Porter   <BenjaminPorter86@gmail.com>" );
 MODULE_AUTHOR( "Realtek WlanFAE	<wlanfae@realtek.com>" );
 MODULE_AUTHOR( "Georgia		<georgia@realtek.com>" );
 MODULE_AUTHOR( "Ziv Huang	<ziv_huang@realtek.com>" );
 MODULE_AUTHOR( "Larry Finger	<Larry.Finger@lwfinger.net>" );
-MODULE_AUTHOR( "Benjamin Porter	<BenjaminPorter86@gmail.com>" );
 MODULE_LICENSE( "GPL" );
 MODULE_DESCRIPTION( "Realtek 8192C/8188C 802.11n PCI wireless" );

@@ -11,10 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -198,8 +194,8 @@ static void _rtl92se_query_rxphystatus( struct ieee80211_hw *hw,
 		pstats->rxpower = rx_pwr_all;
 		pstats->recvsignalpower = rx_pwr_all;
 
-		if ( pstats->is_ht && pstats->rate >= DESC92_RATEMCS8 &&
-		    pstats->rate <= DESC92_RATEMCS15 )
+		if ( pstats->is_ht && pstats->rate >= DESC_RATEMCS8 &&
+		    pstats->rate <= DESC_RATEMCS15 )
 			max_spatial_stream = 2;
 		else
 			max_spatial_stream = 1;
@@ -271,7 +267,6 @@ bool rtl92se_rx_query_desc( struct ieee80211_hw *hw, struct rtl_stats *stats,
 	struct rx_fwinfo *p_drvinfo;
 	u32 phystatus = ( u32 )GET_RX_STATUS_DESC_PHY_STATUS( pdesc );
 	struct ieee80211_hdr *hdr;
-	bool first_ampdu = false;
 
 	stats->length = ( u16 )GET_RX_STATUS_DESC_PKT_LEN( pdesc );
 	stats->rx_drvinfo_size = ( u8 )GET_RX_STATUS_DESC_DRVINFO_SIZE( pdesc ) * 8;
@@ -301,10 +296,10 @@ bool rtl92se_rx_query_desc( struct ieee80211_hw *hw, struct rtl_stats *stats,
 		rx_status->flag |= RX_FLAG_FAILED_FCS_CRC;
 
 	if ( stats->rx_is40Mhzpacket )
-		rx_status->flag |= RX_FLAG_40MHZ;
+		rx_status->bw = RATE_INFO_BW_40;
 
 	if ( stats->is_ht )
-		rx_status->flag |= RX_FLAG_HT;
+		rx_status->encoding = RX_ENC_HT;
 
 	rx_status->flag |= RX_FLAG_MACTIME_START;
 
@@ -319,10 +314,6 @@ bool rtl92se_rx_query_desc( struct ieee80211_hw *hw, struct rtl_stats *stats,
 		hdr = ( struct ieee80211_hdr * )( skb->data +
 		       stats->rx_drvinfo_size + stats->rx_bufshift );
 
-		if ( !hdr ) {
-			/* during testing, hdr was NULL here */
-			return false;
-		}
 		if ( ( _ieee80211_is_robust_mgmt_frame( hdr ) ) &&
 			( ieee80211_has_protected( hdr->frame_control ) ) )
 			rx_status->flag &= ~RX_FLAG_DECRYPTED;
@@ -330,8 +321,8 @@ bool rtl92se_rx_query_desc( struct ieee80211_hw *hw, struct rtl_stats *stats,
 			rx_status->flag |= RX_FLAG_DECRYPTED;
 	}
 
-	rx_status->rate_idx = rtlwifi_rate_mapping( hw,
-			      stats->is_ht, stats->rate, first_ampdu );
+	rx_status->rate_idx = rtlwifi_rate_mapping( hw, stats->is_ht,
+						   false, stats->rate );
 
 	rx_status->mactime = stats->timestamp_low;
 	if ( phystatus ) {
@@ -372,7 +363,7 @@ void rtl92se_tx_fill_desc( struct ieee80211_hw *hw,
 
 	if ( pci_dma_mapping_error( rtlpci->pdev, mapping ) ) {
 		RT_TRACE( rtlpriv, COMP_SEND, DBG_TRACE,
-			 "DMA mapping error" );
+			 "DMA mapping error\n" );
 		return;
 	}
 	if ( mac->opmode == NL80211_IFTYPE_STATION ) {
@@ -405,14 +396,14 @@ void rtl92se_tx_fill_desc( struct ieee80211_hw *hw,
 		SET_TX_DESC_RSVD_MACID( pdesc, reserved_macid );
 
 		SET_TX_DESC_TXHT( pdesc, ( ( ptcb_desc->hw_rate >=
-				 DESC92_RATEMCS0 ) ? 1 : 0 ) );
+				 DESC_RATEMCS0 ) ? 1 : 0 ) );
 
 		if ( rtlhal->version == VERSION_8192S_ACUT ) {
-			if ( ptcb_desc->hw_rate == DESC92_RATE1M ||
-				ptcb_desc->hw_rate  == DESC92_RATE2M ||
-				ptcb_desc->hw_rate == DESC92_RATE5_5M ||
-				ptcb_desc->hw_rate == DESC92_RATE11M ) {
-				ptcb_desc->hw_rate = DESC92_RATE12M;
+			if ( ptcb_desc->hw_rate == DESC_RATE1M ||
+			    ptcb_desc->hw_rate  == DESC_RATE2M ||
+			    ptcb_desc->hw_rate == DESC_RATE5_5M ||
+			    ptcb_desc->hw_rate == DESC_RATE11M ) {
+				ptcb_desc->hw_rate = DESC_RATE12M;
 			}
 		}
 
@@ -441,7 +432,7 @@ void rtl92se_tx_fill_desc( struct ieee80211_hw *hw,
 		SET_TX_DESC_RTS_BANDWIDTH( pdesc, 0 );
 		SET_TX_DESC_RTS_SUB_CARRIER( pdesc, ptcb_desc->rts_sc );
 		SET_TX_DESC_RTS_SHORT( pdesc, ( ( ptcb_desc->rts_rate <=
-		       DESC92_RATE54M ) ?
+		       DESC_RATE54M ) ?
 		       ( ptcb_desc->rts_use_shortpreamble ? 1 : 0 )
 		       : ( ptcb_desc->rts_use_shortgi ? 1 : 0 ) ) );
 
@@ -541,7 +532,7 @@ void rtl92se_tx_fill_cmddesc( struct ieee80211_hw *hw, u8 *pdesc,
 
 	if ( pci_dma_mapping_error( rtlpci->pdev, mapping ) ) {
 		RT_TRACE( rtlpriv, COMP_SEND, DBG_TRACE,
-			 "DMA mapping error" );
+			 "DMA mapping error\n" );
 		return;
 	}
 	/* Clear all status	*/
@@ -599,7 +590,7 @@ void rtl92se_set_desc( struct ieee80211_hw *hw, u8 *pdesc, bool istx,
 			SET_TX_DESC_NEXT_DESC_ADDRESS( pdesc, *( u32 * ) val );
 			break;
 		default:
-			RT_ASSERT( false, "ERR txdesc :%d not process\n",
+			WARN_ONCE( true, "rtl8192se: ERR txdesc :%d not processed\n",
 				  desc_name );
 			break;
 		}
@@ -619,14 +610,15 @@ void rtl92se_set_desc( struct ieee80211_hw *hw, u8 *pdesc, bool istx,
 			SET_RX_STATUS_DESC_EOR( pdesc, 1 );
 			break;
 		default:
-			RT_ASSERT( false, "ERR rxdesc :%d not process\n",
+			WARN_ONCE( true, "rtl8192se: ERR rxdesc :%d not processed\n",
 				  desc_name );
 			break;
 		}
 	}
 }
 
-u32 rtl92se_get_desc( u8 *desc, bool istx, u8 desc_name )
+u64 rtl92se_get_desc( struct ieee80211_hw *hw,
+		     u8 *desc, bool istx, u8 desc_name )
 {
 	u32 ret = 0;
 
@@ -639,7 +631,7 @@ u32 rtl92se_get_desc( u8 *desc, bool istx, u8 desc_name )
 			ret = GET_TX_DESC_TX_BUFFER_ADDRESS( desc );
 			break;
 		default:
-			RT_ASSERT( false, "ERR txdesc :%d not process\n",
+			WARN_ONCE( true, "rtl8192se: ERR txdesc :%d not processed\n",
 				  desc_name );
 			break;
 		}
@@ -651,8 +643,11 @@ u32 rtl92se_get_desc( u8 *desc, bool istx, u8 desc_name )
 		case HW_DESC_RXPKT_LEN:
 			ret = GET_RX_STATUS_DESC_PKT_LEN( desc );
 			break;
+		case HW_DESC_RXBUFF_ADDR:
+			ret = GET_RX_STATUS_DESC_BUFF_ADDR( desc );
+			break;
 		default:
-			RT_ASSERT( false, "ERR rxdesc :%d not process\n",
+			WARN_ONCE( true, "rtl8192se: ERR rxdesc :%d not processed\n",
 				  desc_name );
 			break;
 		}

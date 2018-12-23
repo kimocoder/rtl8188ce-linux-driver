@@ -30,6 +30,13 @@
  * Project homepage: https://github.com/FreedomBen/rtl8188ce-linux-driver
  *
  *
+ *
+ * Bug Fixes and enhancements for Linux Kernels >= 3.2
+ * by Benjamin Porter <BenjaminPorter86@gmail.com>
+ *
+ * Project homepage: https://github.com/FreedomBen/rtl8188ce-linux-driver
+ *
+ *
  * Larry Finger <Larry.Finger@lwfinger.net>
  *
  *****************************************************************************/
@@ -132,9 +139,8 @@ bool rtl88_hal_pwrseqcmdparsing( struct rtl_priv *rtlpriv, u8 cut_version,
 				RT_TRACE( rtlpriv, COMP_INIT, DBG_TRACE,
 					 "rtl88_hal_pwrseqcmdparsing(): PWR_CMD_END\n" );
 				return true;
-				break;
 			default:
-				RT_ASSERT( false,
+				WARN_ONCE( false,
 					  "rtl88_hal_pwrseqcmdparsing(): Unknown CMD!!\n" );
 				break;
 			}

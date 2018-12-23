@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 if [ ! -f "functions.sh" ]; then
     echo -e "${red}[*] Error: Required file functions.sh not present${restore}" >&2
@@ -8,7 +8,8 @@ else
 fi
 
 if ! $(pciDetectsRealtekCard || usbDetectsRealtekCard); then
-    read -p "[*] I wasn't able to find a Realtek card on your machine.  Do you want to proceed anyway?" PROCEED
+    echo -en "${yellow}[*] I wasn't able to find a Realtek card on your machine.  Do you want to proceed anyway? (Y/N)${restore}: "
+    read PROCEED
 
     if ! [ "$PROCEED" = "Y" -o "$PROCEED" = "y" ]; then
         exit 1
@@ -49,7 +50,7 @@ if pciDetectsRtl8188ce || pciDetectsRtl8192ce; then
     if pciDetectsRtl8188ce; then
         CARD="RTL8188CE"
     elif pciDetectsRtl8192ce; then
-        CARD="RTL8188CE"
+        CARD="RTL8192CE"
     fi
 
     echo -e "${blue}[*] I see you have an $CARD card${restore}"

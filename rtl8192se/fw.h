@@ -11,10 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -343,7 +339,6 @@ enum fw_h2c_cmd {
 	H2C_TMP3,
 	H2C_WOWLAN_UPDATE_IV_CMD,			/*50*/
 	H2C_TMP4,
-	MAX_H2CCMD					/*52*/
 };
 
 /* The following macros are used for FW

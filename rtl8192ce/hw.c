@@ -11,10 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -44,7 +40,9 @@
 #include "reg.h"
 #include "def.h"
 #include "phy.h"
+#include "../rtl8192c/dm_common.h"
 #include "../rtl8192c/fw_common.h"
+#include "../rtl8192c/phy_common.h"
 #include "dm.h"
 #include "led.h"
 #include "hw.h"
@@ -60,7 +58,7 @@ static void _rtl92ce_set_bcn_ctrl_reg( struct ieee80211_hw *hw,
 	rtlpci->reg_bcn_ctrl_val |= set_bits;
 	rtlpci->reg_bcn_ctrl_val &= ~clear_bits;
 
-	rtl_write_byte( rtlpriv, REG_BCN_CTRL, ( u8 ) rtlpci->reg_bcn_ctrl_val );
+	rtl_write_byte( rtlpriv, REG_BCN_CTRL, ( u8 )rtlpci->reg_bcn_ctrl_val );
 }
 
 static void _rtl92ce_stop_tx_beacon( struct ieee80211_hw *hw )
@@ -146,9 +144,10 @@ void rtl92ce_get_hw_reg( struct ieee80211_hw *hw, u8 variable, u8 *val )
 
 		break;
 		}
+	case HAL_DEF_WOWLAN:
+		break;
 	default:
-		RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG,
-			 "switch case not processed\n" );
+		pr_err( "switch case %#x not processed\n", variable );
 		break;
 	}
 }
@@ -156,7 +155,6 @@ void rtl92ce_get_hw_reg( struct ieee80211_hw *hw, u8 variable, u8 *val )
 void rtl92ce_set_hw_reg( struct ieee80211_hw *hw, u8 variable, u8 *val )
 {
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
-	struct rtl_pci_priv *rtlpcipriv = rtl_pcipriv( hw );
 	struct rtl_pci *rtlpci = rtl_pcidev( rtl_pcipriv( hw ) );
 	struct rtl_mac *mac = rtl_mac( rtl_priv( hw ) );
 	struct rtl_hal *rtlhal = rtl_hal( rtl_priv( hw ) );
@@ -284,8 +282,8 @@ void rtl92ce_set_hw_reg( struct ieee80211_hw *hw, u8 variable, u8 *val )
 			u8 *p_regtoset = NULL;
 			u8 index = 0;
 
-			if ( ( rtlpcipriv->bt_coexist.bt_coexistence ) &&
-			    ( rtlpcipriv->bt_coexist.bt_coexist_type ==
+			if ( ( rtlpriv->btcoexist.bt_coexistence ) &&
+			    ( rtlpriv->btcoexist.bt_coexist_type ==
 			    BT_CSR_BC4 ) )
 				p_regtoset = regtoset_bt;
 			else
@@ -368,11 +366,11 @@ void rtl92ce_set_hw_reg( struct ieee80211_hw *hw, u8 variable, u8 *val )
 					acm_ctrl &= ( ~AcmHw_ViqEn );
 					break;
 				case AC3_VO:
-					acm_ctrl &= ( ~AcmHw_BeqEn );
+					acm_ctrl &= ( ~AcmHw_VoqEn );
 					break;
 				default:
-					RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG,
-						 "switch case not processed\n" );
+					pr_err( "switch case %#x not processed\n",
+					       e_aci );
 					break;
 				}
 			}
@@ -464,7 +462,7 @@ void rtl92ce_set_hw_reg( struct ieee80211_hw *hw, u8 variable, u8 *val )
 				rtl_write_byte( rtlpriv, REG_FWHW_TXQ_CTRL + 2,
 					       tmp_reg422 & ( ~BIT( 6 ) ) );
 
-				rtl92c_set_fw_rsvdpagepkt( hw, 0 );
+				rtl92c_set_fw_rsvdpagepkt( hw, NULL );
 
 				_rtl92ce_set_bcn_ctrl_reg( hw, BIT( 3 ), 0 );
 				_rtl92ce_set_bcn_ctrl_reg( hw, 0, BIT( 4 ) );
@@ -549,11 +547,15 @@ void rtl92ce_set_hw_reg( struct ieee80211_hw *hw, u8 variable, u8 *val )
 						( u8 * )( &fw_current_inps ) );
 			}
 		break; }
-	case HW_VAR_KEEP_ALIVE:
-		break;
+	case HW_VAR_KEEP_ALIVE: {
+		u8 array[2];
+
+		array[0] = 0xff;
+		array[1] = *( ( u8 * )val );
+		rtl92c_fill_h2c_cmd( hw, H2C_92C_KEEP_ALIVE_CTRL, 2, array );
+		break; }
 	default:
-		RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG,
-			 "switch case %d not processed\n", variable );
+		pr_err( "switch case %d not processed\n", variable );
 		break;
 	}
 }
@@ -574,9 +576,8 @@ static bool _rtl92ce_llt_write( struct ieee80211_hw *hw, u32 address, u32 data )
 			break;
 
 		if ( count > POLLING_LLT_THRESHOLD ) {
-			RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG,
-				 "Failed to polling write LLT done at address %d!\n",
-				 address );
+			pr_err( "Failed to polling write LLT done at address %d!\n",
+			       address );
 			status = false;
 			break;
 		}
@@ -660,26 +661,25 @@ static bool _rtl92ce_llt_table_init( struct ieee80211_hw *hw )
 
 static void _rtl92ce_gen_refresh_led_state( struct ieee80211_hw *hw )
 {
-	struct rtl_pci_priv *pcipriv = rtl_pcipriv( hw );
+	struct rtl_priv *rtlpriv = rtl_priv( hw );
 	struct rtl_pci *rtlpci = rtl_pcidev( rtl_pcipriv( hw ) );
 	struct rtl_ps_ctl *ppsc = rtl_psc( rtl_priv( hw ) );
-	struct rtl_led *pLed0 = &( pcipriv->ledctl.sw_led0 );
+	struct rtl_led *pled0 = &rtlpriv->ledctl.sw_led0;
 
 	if ( rtlpci->up_first_time )
 		return;
 
 	if ( ppsc->rfoff_reason == RF_CHANGE_BY_IPS )
-		rtl92ce_sw_led_on( hw, pLed0 );
+		rtl92ce_sw_led_on( hw, pled0 );
 	else if ( ppsc->rfoff_reason == RF_CHANGE_BY_INIT )
-		rtl92ce_sw_led_on( hw, pLed0 );
+		rtl92ce_sw_led_on( hw, pled0 );
 	else
-		rtl92ce_sw_led_off( hw, pLed0 );
+		rtl92ce_sw_led_off( hw, pled0 );
 }
 
 static bool _rtl92ce_init_mac( struct ieee80211_hw *hw )
 {
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
-	struct rtl_pci_priv *rtlpcipriv = rtl_pcipriv( hw );
 	struct rtl_pci *rtlpci = rtl_pcidev( rtl_pcipriv( hw ) );
 	struct rtl_hal *rtlhal = rtl_hal( rtl_priv( hw ) );
 
@@ -688,7 +688,7 @@ static bool _rtl92ce_init_mac( struct ieee80211_hw *hw )
 	u16 retry;
 
 	rtl_write_byte( rtlpriv, REG_RSV_CTRL, 0x00 );
-	if ( rtlpcipriv->bt_coexist.bt_coexistence ) {
+	if ( rtlpriv->btcoexist.bt_coexistence ) {
 		u32 value32;
 		value32 = rtl_read_dword( rtlpriv, REG_APS_FSMCO );
 		value32 |= ( SOP_ABG | SOP_AMB | XOP_BTCK );
@@ -697,7 +697,7 @@ static bool _rtl92ce_init_mac( struct ieee80211_hw *hw )
 	rtl_write_byte( rtlpriv, REG_SPS0_CTRL, 0x2b );
 	rtl_write_byte( rtlpriv, REG_AFE_XTAL_CTRL, 0x0F );
 
-	if ( rtlpcipriv->bt_coexist.bt_coexistence ) {
+	if ( rtlpriv->btcoexist.bt_coexistence ) {
 		u32 u4b_tmp = rtl_read_dword( rtlpriv, REG_AFE_XTAL_CTRL );
 
 		u4b_tmp &= ( ~0x00024800 );
@@ -731,7 +731,7 @@ static bool _rtl92ce_init_mac( struct ieee80211_hw *hw )
 	rtl_write_byte( rtlpriv, REG_SYS_ISO_CTRL + 1, 0x82 );
 	udelay( 2 );
 
-	if ( rtlpcipriv->bt_coexist.bt_coexistence ) {
+	if ( rtlpriv->btcoexist.bt_coexistence ) {
 		bytetmp = rtl_read_byte( rtlpriv, REG_AFE_XTAL_CTRL+2 ) & 0xfd;
 		rtl_write_byte( rtlpriv, REG_AFE_XTAL_CTRL+2, bytetmp );
 	}
@@ -803,7 +803,6 @@ static void _rtl92ce_hw_configure( struct ieee80211_hw *hw )
 {
 	struct rtl_pci *rtlpci = rtl_pcidev( rtl_pcipriv( hw ) );
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
-	struct rtl_pci_priv *rtlpcipriv = rtl_pcipriv( hw );
 	u8 reg_bw_opmode;
 	u32 reg_prsr;
 
@@ -833,8 +832,8 @@ static void _rtl92ce_hw_configure( struct ieee80211_hw *hw )
 	rtl_write_dword( rtlpriv, REG_RARFRC, 0x01000000 );
 	rtl_write_dword( rtlpriv, REG_RARFRC + 4, 0x07060504 );
 
-	if ( ( rtlpcipriv->bt_coexist.bt_coexistence ) &&
-	    ( rtlpcipriv->bt_coexist.bt_coexist_type == BT_CSR_BC4 ) )
+	if ( ( rtlpriv->btcoexist.bt_coexistence ) &&
+	    ( rtlpriv->btcoexist.bt_coexist_type == BT_CSR_BC4 ) )
 		rtl_write_dword( rtlpriv, REG_AGGLEN_LMT, 0x97427431 );
 	else
 		rtl_write_dword( rtlpriv, REG_AGGLEN_LMT, 0xb972a841 );
@@ -853,8 +852,8 @@ static void _rtl92ce_hw_configure( struct ieee80211_hw *hw )
 	rtl_write_byte( rtlpriv, REG_PIFS, 0x1C );
 	rtl_write_byte( rtlpriv, REG_AGGR_BREAK_TIME, 0x16 );
 
-	if ( ( rtlpcipriv->bt_coexist.bt_coexistence ) &&
-	    ( rtlpcipriv->bt_coexist.bt_coexist_type == BT_CSR_BC4 ) ) {
+	if ( ( rtlpriv->btcoexist.bt_coexistence ) &&
+	    ( rtlpriv->btcoexist.bt_coexist_type == BT_CSR_BC4 ) ) {
 		rtl_write_word( rtlpriv, REG_NAV_PROT_LEN, 0x0020 );
 		rtl_write_word( rtlpriv, REG_PROT_MODE_CTRL, 0x0402 );
 	} else {
@@ -862,8 +861,8 @@ static void _rtl92ce_hw_configure( struct ieee80211_hw *hw )
 		rtl_write_word( rtlpriv, REG_NAV_PROT_LEN, 0x0020 );
 	}
 
-	if ( ( rtlpcipriv->bt_coexist.bt_coexistence ) &&
-	     ( rtlpcipriv->bt_coexist.bt_coexist_type == BT_CSR_BC4 ) )
+	if ( ( rtlpriv->btcoexist.bt_coexistence ) &&
+	    ( rtlpriv->btcoexist.bt_coexist_type == BT_CSR_BC4 ) )
 		rtl_write_dword( rtlpriv, REG_FAST_EDCA_CTRL, 0x03086666 );
 	else
 		rtl_write_dword( rtlpriv, REG_FAST_EDCA_CTRL, 0x086666 );
@@ -960,10 +959,11 @@ int rtl92ce_hw_init( struct ieee80211_hw *hw )
 	local_save_flags( flags );
 	local_irq_enable();
 
+	rtlhal->fw_ready = false;
 	rtlpriv->intf_ops->disable_aspm( hw );
 	rtstatus = _rtl92ce_init_mac( hw );
 	if ( !rtstatus ) {
-		RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG, "Init MAC failed\n" );
+		pr_err( "Init MAC failed\n" );
 		err = 1;
 		goto exit;
 	}
@@ -976,6 +976,7 @@ int rtl92ce_hw_init( struct ieee80211_hw *hw )
 		goto exit;
 	}
 
+	rtlhal->fw_ready = true;
 	rtlhal->last_hmeboxnum = 0;
 	rtl92c_phy_mac_config( hw );
 	/* because last function modify RCR, so we update
@@ -992,7 +993,7 @@ int rtl92ce_hw_init( struct ieee80211_hw *hw )
 	    !IS_92C_SERIAL( rtlhal->version ) ) {
 		rtl_set_rfreg( hw, RF90_PATH_A, RF_RX_G1, MASKDWORD, 0x30255 );
 		rtl_set_rfreg( hw, RF90_PATH_A, RF_RX_G2, MASKDWORD, 0x50a00 );
-	} else if ( IS_81xxC_VENDOR_UMC_B_CUT( rtlhal->version ) ) {
+	} else if ( IS_81XXC_VENDOR_UMC_B_CUT( rtlhal->version ) ) {
 		rtl_set_rfreg( hw, RF90_PATH_A, 0x0C, MASKDWORD, 0x894AE );
 		rtl_set_rfreg( hw, RF90_PATH_A, 0x0A, MASKDWORD, 0x1AF31 );
 		rtl_set_rfreg( hw, RF90_PATH_A, RF_IPA, MASKDWORD, 0x8F425 );
@@ -1127,8 +1128,7 @@ static enum version_8192c _rtl92ce_read_chip_version( struct ieee80211_hw *hw )
 		break;
 	}
 
-	RT_TRACE( rtlpriv, COMP_INIT, DBG_EMERG,
-		 "Chip Version ID: %s\n", versionid );
+	pr_info( "Chip Version ID: %s\n", versionid );
 
 	switch ( version & 0x3 ) {
 	case CHIP_88C:
@@ -1142,8 +1142,7 @@ static enum version_8192c _rtl92ce_read_chip_version( struct ieee80211_hw *hw )
 		break;
 	default:
 		rtlphy->rf_type = RF_1T1R;
-		RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG,
-			 "ERROR RF_Type is set!!\n" );
+		pr_err( "ERROR RF_Type is set!!\n" );
 		break;
 	}
 
@@ -1159,61 +1158,70 @@ static int _rtl92ce_set_media_status( struct ieee80211_hw *hw,
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
 	u8 bt_msr = rtl_read_byte( rtlpriv, MSR );
 	enum led_ctl_mode ledaction = LED_CTL_NO_LINK;
-	bt_msr &= 0xfc;
+	u8 mode = MSR_NOLINK;
 
-	if ( type == NL80211_IFTYPE_UNSPECIFIED ||
-	    type == NL80211_IFTYPE_STATION ) {
-		_rtl92ce_stop_tx_beacon( hw );
-		_rtl92ce_enable_bcn_sub_func( hw );
-	} else if ( type == NL80211_IFTYPE_ADHOC || type == NL80211_IFTYPE_AP ||
-		   type == NL80211_IFTYPE_MESH_POINT ) {
-		_rtl92ce_resume_tx_beacon( hw );
-		_rtl92ce_disable_bcn_sub_func( hw );
-	} else {
-		RT_TRACE( rtlpriv, COMP_ERR, DBG_WARNING,
-			 "Set HW_VAR_MEDIA_STATUS: No such media status(%x)\n",
-			 type );
-	}
+	bt_msr &= 0xfc;
 
 	switch ( type ) {
 	case NL80211_IFTYPE_UNSPECIFIED:
-		bt_msr |= MSR_NOLINK;
-		ledaction = LED_CTL_LINK;
+		mode = MSR_NOLINK;
 		RT_TRACE( rtlpriv, COMP_INIT, DBG_TRACE,
 			 "Set Network type to NO LINK!\n" );
 		break;
 	case NL80211_IFTYPE_ADHOC:
-		bt_msr |= MSR_ADHOC;
+		mode = MSR_ADHOC;
 		RT_TRACE( rtlpriv, COMP_INIT, DBG_TRACE,
 			 "Set Network type to Ad Hoc!\n" );
 		break;
 	case NL80211_IFTYPE_STATION:
-		bt_msr |= MSR_INFRA;
+		mode = MSR_INFRA;
 		ledaction = LED_CTL_LINK;
 		RT_TRACE( rtlpriv, COMP_INIT, DBG_TRACE,
 			 "Set Network type to STA!\n" );
 		break;
 	case NL80211_IFTYPE_AP:
-		bt_msr |= MSR_AP;
+		mode = MSR_AP;
+		ledaction = LED_CTL_LINK;
 		RT_TRACE( rtlpriv, COMP_INIT, DBG_TRACE,
 			 "Set Network type to AP!\n" );
 		break;
 	case NL80211_IFTYPE_MESH_POINT:
-		bt_msr |= MSR_ADHOC;
+		mode = MSR_ADHOC;
 		RT_TRACE( rtlpriv, COMP_INIT, DBG_TRACE,
 			 "Set Network type to Mesh Point!\n" );
 		break;
 	default:
-		RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG,
-			 "Network type %d not supported!\n", type );
+		pr_err( "Network type %d not supported!\n", type );
 		return 1;
-		break;
 
 	}
 
-	rtl_write_byte( rtlpriv, ( MSR ), bt_msr );
+	/* MSR_INFRA == Link in infrastructure network;
+	 * MSR_ADHOC == Link in ad hoc network;
+	 * Therefore, check link state is necessary.
+	 *
+	 * MSR_AP == AP mode; link state does not matter here.
+	 */
+	if ( mode != MSR_AP &&
+	    rtlpriv->mac80211.link_state < MAC80211_LINKED ) {
+		mode = MSR_NOLINK;
+		ledaction = LED_CTL_NO_LINK;
+	}
+	if ( mode == MSR_NOLINK || mode == MSR_INFRA ) {
+		_rtl92ce_stop_tx_beacon( hw );
+		_rtl92ce_enable_bcn_sub_func( hw );
+	} else if ( mode == MSR_ADHOC || mode == MSR_AP ) {
+		_rtl92ce_resume_tx_beacon( hw );
+		_rtl92ce_disable_bcn_sub_func( hw );
+	} else {
+		RT_TRACE( rtlpriv, COMP_ERR, DBG_WARNING,
+			 "Set HW_VAR_MEDIA_STATUS: No such media status(%x).\n",
+			 mode );
+	}
+	rtl_write_byte( rtlpriv, MSR, bt_msr | mode );
+
 	rtlpriv->cfg->ops->led_control( hw, ledaction );
-	if ( ( bt_msr & 0xfc ) == MSR_AP )
+	if ( mode == MSR_AP )
 		rtl_write_byte( rtlpriv, REG_BCNTCFG + 1, 0x00 );
 	else
 		rtl_write_byte( rtlpriv, REG_BCNTCFG + 1, 0x66 );
@@ -1281,7 +1289,7 @@ void rtl92ce_set_qos( struct ieee80211_hw *hw, int aci )
 		rtl_write_dword( rtlpriv, REG_EDCA_VO_PARAM, 0x2f3222 );
 		break;
 	default:
-		RT_ASSERT( false, "invalid aci: %d !\n", aci );
+		WARN_ONCE( true, "rtl8192ce: invalid aci: %d !\n", aci );
 		break;
 	}
 }
@@ -1293,6 +1301,7 @@ void rtl92ce_enable_interrupt( struct ieee80211_hw *hw )
 
 	rtl_write_dword( rtlpriv, REG_HIMR, rtlpci->irq_mask[0] & 0xFFFFFFFF );
 	rtl_write_dword( rtlpriv, REG_HIMRE, rtlpci->irq_mask[1] & 0xFFFFFFFF );
+	rtlpci->irq_enabled = true;
 }
 
 void rtl92ce_disable_interrupt( struct ieee80211_hw *hw )
@@ -1302,13 +1311,12 @@ void rtl92ce_disable_interrupt( struct ieee80211_hw *hw )
 
 	rtl_write_dword( rtlpriv, REG_HIMR, IMR8190_DISABLED );
 	rtl_write_dword( rtlpriv, REG_HIMRE, IMR8190_DISABLED );
-	synchronize_irq( rtlpci->pdev->irq );
+	rtlpci->irq_enabled = false;
 }
 
 static void _rtl92ce_poweroff_adapter( struct ieee80211_hw *hw )
 {
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
-	struct rtl_pci_priv *rtlpcipriv = rtl_pcipriv( hw );
 	struct rtl_hal *rtlhal = rtl_hal( rtlpriv );
 	u8 u1b_tmp;
 	u32 u4b_tmp;
@@ -1326,9 +1334,9 @@ static void _rtl92ce_poweroff_adapter( struct ieee80211_hw *hw )
 	rtl_write_byte( rtlpriv, REG_MCUFWDL, 0x00 );
 	rtl_write_dword( rtlpriv, REG_GPIO_PIN_CTRL, 0x00000000 );
 	u1b_tmp = rtl_read_byte( rtlpriv, REG_GPIO_PIN_CTRL );
-	if ( ( rtlpcipriv->bt_coexist.bt_coexistence ) &&
-	     ( ( rtlpcipriv->bt_coexist.bt_coexist_type == BT_CSR_BC4 ) ||
-	     ( rtlpcipriv->bt_coexist.bt_coexist_type == BT_CSR_BC8 ) ) ) {
+	if ( ( rtlpriv->btcoexist.bt_coexistence ) &&
+	    ( ( rtlpriv->btcoexist.bt_coexist_type == BT_CSR_BC4 ) ||
+	     ( rtlpriv->btcoexist.bt_coexist_type == BT_CSR_BC8 ) ) ) {
 		rtl_write_dword( rtlpriv, REG_GPIO_PIN_CTRL, 0x00F30000 |
 				( u1b_tmp << 8 ) );
 	} else {
@@ -1338,9 +1346,9 @@ static void _rtl92ce_poweroff_adapter( struct ieee80211_hw *hw )
 	rtl_write_word( rtlpriv, REG_GPIO_IO_SEL, 0x0790 );
 	rtl_write_word( rtlpriv, REG_LEDCFG0, 0x8080 );
 	rtl_write_byte( rtlpriv, REG_AFE_PLL_CTRL, 0x80 );
-	if ( !IS_81xxC_VENDOR_UMC_B_CUT( rtlhal->version ) )
+	if ( !IS_81XXC_VENDOR_UMC_B_CUT( rtlhal->version ) )
 		rtl_write_byte( rtlpriv, REG_SPS0_CTRL, 0x23 );
-	if ( rtlpcipriv->bt_coexist.bt_coexistence ) {
+	if ( rtlpriv->btcoexist.bt_coexistence ) {
 		u4b_tmp = rtl_read_dword( rtlpriv, REG_AFE_XTAL_CTRL );
 		u4b_tmp |= 0x03824800;
 		rtl_write_dword( rtlpriv, REG_AFE_XTAL_CTRL, u4b_tmp );
@@ -1374,18 +1382,13 @@ void rtl92ce_card_disable( struct ieee80211_hw *hw )
 }
 
 void rtl92ce_interrupt_recognized( struct ieee80211_hw *hw,
-				  u32 *p_inta, u32 *p_intb )
+				  struct rtl_int *intvec )
 {
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
 	struct rtl_pci *rtlpci = rtl_pcidev( rtl_pcipriv( hw ) );
 
-	*p_inta = rtl_read_dword( rtlpriv, ISR ) & rtlpci->irq_mask[0];
-	rtl_write_dword( rtlpriv, ISR, *p_inta );
-
-	/*
-	 * *p_intb = rtl_read_dword( rtlpriv, REG_HISRE ) & rtlpci->irq_mask[1];
-	 * rtl_write_dword( rtlpriv, ISR + 4, *p_intb );
-	 */
+	intvec->inta = rtl_read_dword( rtlpriv, ISR ) & rtlpci->irq_mask[0];
+	rtl_write_dword( rtlpriv, ISR, intvec->inta );
 }
 
 void rtl92ce_set_beacon_related_registers( struct ieee80211_hw *hw )
@@ -1502,7 +1505,7 @@ static void _rtl92ce_read_txpower_info_from_hwpg( struct ieee80211_hw *hw,
 
 	for ( rf_path = 0; rf_path < 2; rf_path++ ) {
 		for ( i = 0; i < 14; i++ ) {
-			index = _rtl92c_get_chnl_group( ( u8 ) i );
+			index = rtl92c_get_chnl_group( ( u8 )i );
 
 			rtlefuse->txpwrlevel_cck[rf_path][i] =
 			    rtlefuse->eeprom_chnlarea_txpwr_cck[rf_path][index];
@@ -1551,7 +1554,7 @@ static void _rtl92ce_read_txpower_info_from_hwpg( struct ieee80211_hw *hw,
 
 	for ( rf_path = 0; rf_path < 2; rf_path++ ) {
 		for ( i = 0; i < 14; i++ ) {
-			index = _rtl92c_get_chnl_group( ( u8 ) i );
+			index = rtl92c_get_chnl_group( ( u8 )i );
 
 			if ( rf_path == RF90_PATH_A ) {
 				rtlefuse->pwrgroup_ht20[rf_path][i] =
@@ -1581,7 +1584,7 @@ static void _rtl92ce_read_txpower_info_from_hwpg( struct ieee80211_hw *hw,
 	}
 
 	for ( i = 0; i < 14; i++ ) {
-		index = _rtl92c_get_chnl_group( ( u8 ) i );
+		index = rtl92c_get_chnl_group( ( u8 )i );
 
 		if ( !autoload_fail )
 			tempval = hwinfo[EEPROM_TXPOWERHT20DIFF + index];
@@ -1598,7 +1601,7 @@ static void _rtl92ce_read_txpower_info_from_hwpg( struct ieee80211_hw *hw,
 		if ( rtlefuse->txpwr_ht20diff[RF90_PATH_B][i] & BIT( 3 ) )
 			rtlefuse->txpwr_ht20diff[RF90_PATH_B][i] |= 0xF0;
 
-		index = _rtl92c_get_chnl_group( ( u8 ) i );
+		index = rtl92c_get_chnl_group( ( u8 )i );
 
 		if ( !autoload_fail )
 			tempval = hwinfo[EEPROM_TXPOWER_OFDMDIFF + index];
@@ -1667,58 +1670,18 @@ static void _rtl92ce_read_adapter_info( struct ieee80211_hw *hw )
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
 	struct rtl_efuse *rtlefuse = rtl_efuse( rtl_priv( hw ) );
 	struct rtl_hal *rtlhal = rtl_hal( rtl_priv( hw ) );
-	u16 i, usvalue;
-	u8 hwinfo[HWSET_MAX_SIZE];
-	u16 eeprom_id;
+	int params[] = {RTL8190_EEPROM_ID, EEPROM_VID, EEPROM_DID,
+			EEPROM_SVID, EEPROM_SMID, EEPROM_MAC_ADDR,
+			EEPROM_CHANNELPLAN, EEPROM_VERSION, EEPROM_CUSTOMER_ID,
+			COUNTRY_CODE_WORLD_WIDE_13};
+	u8 *hwinfo;
 
-	if ( rtlefuse->epromtype == EEPROM_BOOT_EFUSE ) {
-		rtl_efuse_shadow_map_update( hw );
-
-		memcpy( ( void * )hwinfo,
-		       ( void * )&rtlefuse->efuse_map[EFUSE_INIT_MAP][0],
-		       HWSET_MAX_SIZE );
-	} else if ( rtlefuse->epromtype == EEPROM_93C46 ) {
-		RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG,
-			 "RTL819X Not boot from eeprom, check it !!" );
-	}
-
-	RT_PRINT_DATA( rtlpriv, COMP_INIT, DBG_DMESG, "MAP",
-		      hwinfo, HWSET_MAX_SIZE );
-
-	eeprom_id = *( ( u16 * )&hwinfo[0] );
-	if ( eeprom_id != RTL8190_EEPROM_ID ) {
-		RT_TRACE( rtlpriv, COMP_ERR, DBG_WARNING,
-			 "EEPROM ID(%#x) is invalid!!\n", eeprom_id );
-		rtlefuse->autoload_failflag = true;
-	} else {
-		RT_TRACE( rtlpriv, COMP_INIT, DBG_LOUD, "Autoload OK\n" );
-		rtlefuse->autoload_failflag = false;
-	}
-
-	if ( rtlefuse->autoload_failflag )
+	hwinfo = kzalloc( HWSET_MAX_SIZE, GFP_KERNEL );
+	if ( !hwinfo )
 		return;
 
-	rtlefuse->eeprom_vid = *( u16 * )&hwinfo[EEPROM_VID];
-	rtlefuse->eeprom_did = *( u16 * )&hwinfo[EEPROM_DID];
-	rtlefuse->eeprom_svid = *( u16 * )&hwinfo[EEPROM_SVID];
-	rtlefuse->eeprom_smid = *( u16 * )&hwinfo[EEPROM_SMID];
-	RT_TRACE( rtlpriv, COMP_INIT, DBG_LOUD,
-		 "EEPROMId = 0x%4x\n", eeprom_id );
-	RT_TRACE( rtlpriv, COMP_INIT, DBG_LOUD,
-		 "EEPROM VID = 0x%4x\n", rtlefuse->eeprom_vid );
-	RT_TRACE( rtlpriv, COMP_INIT, DBG_LOUD,
-		 "EEPROM DID = 0x%4x\n", rtlefuse->eeprom_did );
-	RT_TRACE( rtlpriv, COMP_INIT, DBG_LOUD,
-		 "EEPROM SVID = 0x%4x\n", rtlefuse->eeprom_svid );
-	RT_TRACE( rtlpriv, COMP_INIT, DBG_LOUD,
-		 "EEPROM SMID = 0x%4x\n", rtlefuse->eeprom_smid );
-
-	for ( i = 0; i < 6; i += 2 ) {
-		usvalue = *( u16 * )&hwinfo[EEPROM_MAC_ADDR + i];
-		*( ( u16 * ) ( &rtlefuse->dev_addr[i] ) ) = usvalue;
-	}
-
-	RT_TRACE( rtlpriv, COMP_INIT, DBG_DMESG, "%pM\n", rtlefuse->dev_addr );
+	if ( rtl_get_hwinfo( hw, rtlpriv, HWSET_MAX_SIZE, hwinfo, params ) )
+		goto exit;
 
 	_rtl92ce_read_txpower_info_from_hwpg( hw,
 					     rtlefuse->autoload_failflag,
@@ -1727,18 +1690,6 @@ static void _rtl92ce_read_adapter_info( struct ieee80211_hw *hw )
 	rtl8192ce_read_bt_coexist_info_from_hwpg( hw,
 						 rtlefuse->autoload_failflag,
 						 hwinfo );
-
-	rtlefuse->eeprom_channelplan = *&hwinfo[EEPROM_CHANNELPLAN];
-	rtlefuse->eeprom_version = *( u16 * )&hwinfo[EEPROM_VERSION];
-	rtlefuse->txpwr_fromeprom = true;
-	rtlefuse->eeprom_oemid = *&hwinfo[EEPROM_CUSTOMER_ID];
-
-	RT_TRACE( rtlpriv, COMP_INIT, DBG_LOUD,
-		 "EEPROM Customer ID: 0x%2x\n", rtlefuse->eeprom_oemid );
-
-	/* set channel paln to world wide 13 */
-	rtlefuse->channel_plan = COUNTRY_CODE_WORLD_WIDE_13;
-
 	if ( rtlhal->oem_id == RT_CID_DEFAULT ) {
 		switch ( rtlefuse->eeprom_oemid ) {
 		case EEPROM_CID_DEFAULT:
@@ -1762,21 +1713,20 @@ static void _rtl92ce_read_adapter_info( struct ieee80211_hw *hw )
 		default:
 			rtlhal->oem_id = RT_CID_DEFAULT;
 			break;
-
 		}
 	}
-
+exit:
+	kfree( hwinfo );
 }
 
 static void _rtl92ce_hal_customized_behavior( struct ieee80211_hw *hw )
 {
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
-	struct rtl_pci_priv *pcipriv = rtl_pcipriv( hw );
 	struct rtl_hal *rtlhal = rtl_hal( rtl_priv( hw ) );
 
 	switch ( rtlhal->oem_id ) {
 	case RT_CID_819X_HP:
-		pcipriv->ledctl.led_opendrain = true;
+		rtlpriv->ledctl.led_opendrain = true;
 		break;
 	case RT_CID_819X_LENOVO:
 	case RT_CID_DEFAULT:
@@ -1820,7 +1770,7 @@ void rtl92ce_read_eeprom_info( struct ieee80211_hw *hw )
 		rtlefuse->autoload_failflag = false;
 		_rtl92ce_read_adapter_info( hw );
 	} else {
-		RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG, "Autoload ERR!!\n" );
+		pr_err( "Autoload ERR!!\n" );
 	}
 	_rtl92ce_hal_customized_behavior( hw );
 }
@@ -1829,14 +1779,12 @@ static void rtl92ce_update_hal_rate_table( struct ieee80211_hw *hw,
 		struct ieee80211_sta *sta )
 {
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
-	struct rtl_pci_priv *rtlpcipriv = rtl_pcipriv( hw );
 	struct rtl_phy *rtlphy = &( rtlpriv->phy );
 	struct rtl_mac *mac = rtl_mac( rtl_priv( hw ) );
 	struct rtl_hal *rtlhal = rtl_hal( rtl_priv( hw ) );
 	u32 ratr_value;
 	u8 ratr_index = 0;
 	u8 nmode = mac->ht_enable;
-	u8 mimo_ps = IEEE80211_SMPS_OFF;
 	u16 shortgi_rate;
 	u32 tmp_ratr_value;
 	u8 curtxbw_40mhz = mac->bw_40;
@@ -1845,6 +1793,7 @@ static void rtl92ce_update_hal_rate_table( struct ieee80211_hw *hw,
 	u8 curshortgi_20mhz = ( sta->ht_cap.cap & IEEE80211_HT_CAP_SGI_20 ) ?
 			       1 : 0;
 	enum wireless_mode wirelessmode = mac->mode;
+	u32 ratr_mask;
 
 	if ( rtlhal->current_bandtype == BAND_ON_5G )
 		ratr_value = sta->supp_rates[1] << 4;
@@ -1868,19 +1817,13 @@ static void rtl92ce_update_hal_rate_table( struct ieee80211_hw *hw,
 	case WIRELESS_MODE_N_24G:
 	case WIRELESS_MODE_N_5G:
 		nmode = 1;
-		if ( mimo_ps == IEEE80211_SMPS_STATIC ) {
-			ratr_value &= 0x0007F005;
-		} else {
-			u32 ratr_mask;
+		if ( get_rf_type( rtlphy ) == RF_1T2R ||
+		    get_rf_type( rtlphy ) == RF_1T1R )
+			ratr_mask = 0x000ff005;
+		else
+			ratr_mask = 0x0f0ff005;
 
-			if ( get_rf_type( rtlphy ) == RF_1T2R ||
-			    get_rf_type( rtlphy ) == RF_1T1R )
-				ratr_mask = 0x000ff005;
-			else
-				ratr_mask = 0x0f0ff005;
-
-			ratr_value &= ratr_mask;
-		}
+		ratr_value &= ratr_mask;
 		break;
 	default:
 		if ( rtlphy->rf_type == RF_1T2R )
@@ -1891,12 +1834,12 @@ static void rtl92ce_update_hal_rate_table( struct ieee80211_hw *hw,
 		break;
 	}
 
-	if ( ( rtlpcipriv->bt_coexist.bt_coexistence ) &&
-	    ( rtlpcipriv->bt_coexist.bt_coexist_type == BT_CSR_BC4 ) &&
-	    ( rtlpcipriv->bt_coexist.bt_cur_state ) &&
-	    ( rtlpcipriv->bt_coexist.bt_ant_isolation ) &&
-	    ( ( rtlpcipriv->bt_coexist.bt_service == BT_SCO ) ||
-	    ( rtlpcipriv->bt_coexist.bt_service == BT_BUSY ) ) )
+	if ( ( rtlpriv->btcoexist.bt_coexistence ) &&
+	    ( rtlpriv->btcoexist.bt_coexist_type == BT_CSR_BC4 ) &&
+	    ( rtlpriv->btcoexist.bt_cur_state ) &&
+	    ( rtlpriv->btcoexist.bt_ant_isolation ) &&
+	    ( ( rtlpriv->btcoexist.bt_service == BT_SCO ) ||
+	    ( rtlpriv->btcoexist.bt_service == BT_BUSY ) ) )
 		ratr_value &= 0x0fffcfc0;
 	else
 		ratr_value &= 0x0FFFFFFF;
@@ -1924,7 +1867,7 @@ static void rtl92ce_update_hal_rate_table( struct ieee80211_hw *hw,
 }
 
 static void rtl92ce_update_hal_rate_mask( struct ieee80211_hw *hw,
-		struct ieee80211_sta *sta, u8 rssi_level )
+		struct ieee80211_sta *sta, u8 rssi_level, bool update_bw )
 {
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
 	struct rtl_phy *rtlphy = &( rtlpriv->phy );
@@ -1933,17 +1876,16 @@ static void rtl92ce_update_hal_rate_mask( struct ieee80211_hw *hw,
 	struct rtl_sta_info *sta_entry = NULL;
 	u32 ratr_bitmap;
 	u8 ratr_index;
-	u8 curtxbw_40mhz = ( sta->bandwidth >= IEEE80211_STA_RX_BW_40 ) ? 1 : 0;
-	u8 curshortgi_40mhz = curtxbw_40mhz &&
-			      ( sta->ht_cap.cap & IEEE80211_HT_CAP_SGI_40 ) ?
-				1 : 0;
+	u8 curtxbw_40mhz = ( sta->ht_cap.cap &
+			    IEEE80211_HT_CAP_SUP_WIDTH_20_40 ) ? 1 : 0;
+	u8 curshortgi_40mhz = ( sta->ht_cap.cap &
+			       IEEE80211_HT_CAP_SGI_40 ) ?  1 : 0;
 	u8 curshortgi_20mhz = ( sta->ht_cap.cap & IEEE80211_HT_CAP_SGI_20 ) ?
 				1 : 0;
 	enum wireless_mode wirelessmode = 0;
 	bool shortgi = false;
 	u8 rate_mask[5];
 	u8 macid = 0;
-	u8 mimo_ps = IEEE80211_SMPS_OFF;
 
 	sta_entry = ( struct rtl_sta_info * ) sta->drv_priv;
 	wirelessmode = sta_entry->wireless_mode;
@@ -1988,47 +1930,38 @@ static void rtl92ce_update_hal_rate_mask( struct ieee80211_hw *hw,
 	case WIRELESS_MODE_N_5G:
 		ratr_index = RATR_INX_WIRELESS_NGB;
 
-		if ( mimo_ps == IEEE80211_SMPS_STATIC ) {
-			if ( rssi_level == 1 )
-				ratr_bitmap &= 0x00070000;
-			else if ( rssi_level == 2 )
-				ratr_bitmap &= 0x0007f000;
-			else
-				ratr_bitmap &= 0x0007f005;
-		} else {
-			if ( rtlphy->rf_type == RF_1T2R ||
-			    rtlphy->rf_type == RF_1T1R ) {
-				if ( curtxbw_40mhz ) {
-					if ( rssi_level == 1 )
-						ratr_bitmap &= 0x000f0000;
-					else if ( rssi_level == 2 )
-						ratr_bitmap &= 0x000ff000;
-					else
-						ratr_bitmap &= 0x000ff015;
-				} else {
-					if ( rssi_level == 1 )
-						ratr_bitmap &= 0x000f0000;
-					else if ( rssi_level == 2 )
-						ratr_bitmap &= 0x000ff000;
-					else
-						ratr_bitmap &= 0x000ff005;
-				}
+		if ( rtlphy->rf_type == RF_1T2R ||
+		    rtlphy->rf_type == RF_1T1R ) {
+			if ( curtxbw_40mhz ) {
+				if ( rssi_level == 1 )
+					ratr_bitmap &= 0x000f0000;
+				else if ( rssi_level == 2 )
+					ratr_bitmap &= 0x000ff000;
+				else
+					ratr_bitmap &= 0x000ff015;
 			} else {
-				if ( curtxbw_40mhz ) {
-					if ( rssi_level == 1 )
-						ratr_bitmap &= 0x0f0f0000;
-					else if ( rssi_level == 2 )
-						ratr_bitmap &= 0x0f0ff000;
-					else
-						ratr_bitmap &= 0x0f0ff015;
-				} else {
-					if ( rssi_level == 1 )
-						ratr_bitmap &= 0x0f0f0000;
-					else if ( rssi_level == 2 )
-						ratr_bitmap &= 0x0f0ff000;
-					else
-						ratr_bitmap &= 0x0f0ff005;
-				}
+				if ( rssi_level == 1 )
+					ratr_bitmap &= 0x000f0000;
+				else if ( rssi_level == 2 )
+					ratr_bitmap &= 0x000ff000;
+				else
+					ratr_bitmap &= 0x000ff005;
+			}
+		} else {
+			if ( curtxbw_40mhz ) {
+				if ( rssi_level == 1 )
+					ratr_bitmap &= 0x0f0f0000;
+				else if ( rssi_level == 2 )
+					ratr_bitmap &= 0x0f0ff000;
+				else
+					ratr_bitmap &= 0x0f0ff015;
+			} else {
+				if ( rssi_level == 1 )
+					ratr_bitmap &= 0x0f0f0000;
+				else if ( rssi_level == 2 )
+					ratr_bitmap &= 0x0f0ff000;
+				else
+					ratr_bitmap &= 0x0f0ff005;
 			}
 		}
 
@@ -2061,18 +1994,15 @@ static void rtl92ce_update_hal_rate_mask( struct ieee80211_hw *hw,
 		 "Rate_index:%x, ratr_val:%x, %5phC\n",
 		 ratr_index, ratr_bitmap, rate_mask );
 	rtl92c_fill_h2c_cmd( hw, H2C_RA_MASK, 5, rate_mask );
-
-	if ( macid != 0 )
-		sta_entry->ratr_index = ratr_index;
 }
 
 void rtl92ce_update_hal_rate_tbl( struct ieee80211_hw *hw,
-		struct ieee80211_sta *sta, u8 rssi_level )
+		struct ieee80211_sta *sta, u8 rssi_level, bool update_bw )
 {
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
 
 	if ( rtlpriv->dm.useramask )
-		rtl92ce_update_hal_rate_mask( hw, sta, rssi_level );
+		rtl92ce_update_hal_rate_mask( hw, sta, rssi_level, update_bw );
 	else
 		rtl92ce_update_hal_rate_table( hw, sta );
 }
@@ -2211,8 +2141,8 @@ void rtl92ce_set_key( struct ieee80211_hw *hw, u32 key_index,
 			enc_algo = CAM_AES;
 			break;
 		default:
-			RT_TRACE( rtlpriv, COMP_ERR, DBG_EMERG,
-				 "switch case not processed\n" );
+			pr_err( "switch case %#x not processed\n",
+			       enc_algo );
 			enc_algo = CAM_TKIP;
 			break;
 		}
@@ -2230,9 +2160,7 @@ void rtl92ce_set_key( struct ieee80211_hw *hw, u32 key_index,
 					entry_id = rtl_cam_get_free_entry( hw,
 								 p_macaddr );
 					if ( entry_id >=  TOTAL_CAM_ENTRY ) {
-						RT_TRACE( rtlpriv, COMP_SEC,
-							 DBG_EMERG,
-							 "Can not find free hw security cam entry\n" );
+						pr_err( "Can not find free hw security cam entry\n" );
 						return;
 					}
 				} else {
@@ -2305,65 +2233,64 @@ void rtl92ce_set_key( struct ieee80211_hw *hw, u32 key_index,
 
 static void rtl8192ce_bt_var_init( struct ieee80211_hw *hw )
 {
-	struct rtl_pci_priv *rtlpcipriv = rtl_pcipriv( hw );
+	struct rtl_priv *rtlpriv = rtl_priv( hw );
 
-	rtlpcipriv->bt_coexist.bt_coexistence =
-			rtlpcipriv->bt_coexist.eeprom_bt_coexist;
-	rtlpcipriv->bt_coexist.bt_ant_num =
-			rtlpcipriv->bt_coexist.eeprom_bt_ant_num;
-	rtlpcipriv->bt_coexist.bt_coexist_type =
-			rtlpcipriv->bt_coexist.eeprom_bt_type;
+	rtlpriv->btcoexist.bt_coexistence =
+			rtlpriv->btcoexist.eeprom_bt_coexist;
+	rtlpriv->btcoexist.bt_ant_num =
+			rtlpriv->btcoexist.eeprom_bt_ant_num;
+	rtlpriv->btcoexist.bt_coexist_type =
+			rtlpriv->btcoexist.eeprom_bt_type;
 
-	if ( rtlpcipriv->bt_coexist.reg_bt_iso == 2 )
-		rtlpcipriv->bt_coexist.bt_ant_isolation =
-			rtlpcipriv->bt_coexist.eeprom_bt_ant_isol;
+	if ( rtlpriv->btcoexist.reg_bt_iso == 2 )
+		rtlpriv->btcoexist.bt_ant_isolation =
+			rtlpriv->btcoexist.eeprom_bt_ant_isol;
 	else
-		rtlpcipriv->bt_coexist.bt_ant_isolation =
-			rtlpcipriv->bt_coexist.reg_bt_iso;
+		rtlpriv->btcoexist.bt_ant_isolation =
+			rtlpriv->btcoexist.reg_bt_iso;
 
-	rtlpcipriv->bt_coexist.bt_radio_shared_type =
-			rtlpcipriv->bt_coexist.eeprom_bt_radio_shared;
+	rtlpriv->btcoexist.bt_radio_shared_type =
+			rtlpriv->btcoexist.eeprom_bt_radio_shared;
 
-	if ( rtlpcipriv->bt_coexist.bt_coexistence ) {
-
-		if ( rtlpcipriv->bt_coexist.reg_bt_sco == 1 )
-			rtlpcipriv->bt_coexist.bt_service = BT_OTHER_ACTION;
-		else if ( rtlpcipriv->bt_coexist.reg_bt_sco == 2 )
-			rtlpcipriv->bt_coexist.bt_service = BT_SCO;
-		else if ( rtlpcipriv->bt_coexist.reg_bt_sco == 4 )
-			rtlpcipriv->bt_coexist.bt_service = BT_BUSY;
-		else if ( rtlpcipriv->bt_coexist.reg_bt_sco == 5 )
-			rtlpcipriv->bt_coexist.bt_service = BT_OTHERBUSY;
+	if ( rtlpriv->btcoexist.bt_coexistence ) {
+		if ( rtlpriv->btcoexist.reg_bt_sco == 1 )
+			rtlpriv->btcoexist.bt_service = BT_OTHER_ACTION;
+		else if ( rtlpriv->btcoexist.reg_bt_sco == 2 )
+			rtlpriv->btcoexist.bt_service = BT_SCO;
+		else if ( rtlpriv->btcoexist.reg_bt_sco == 4 )
+			rtlpriv->btcoexist.bt_service = BT_BUSY;
+		else if ( rtlpriv->btcoexist.reg_bt_sco == 5 )
+			rtlpriv->btcoexist.bt_service = BT_OTHERBUSY;
 		else
-			rtlpcipriv->bt_coexist.bt_service = BT_IDLE;
+			rtlpriv->btcoexist.bt_service = BT_IDLE;
 
-		rtlpcipriv->bt_coexist.bt_edca_ul = 0;
-		rtlpcipriv->bt_coexist.bt_edca_dl = 0;
-		rtlpcipriv->bt_coexist.bt_rssi_state = 0xff;
+		rtlpriv->btcoexist.bt_edca_ul = 0;
+		rtlpriv->btcoexist.bt_edca_dl = 0;
+		rtlpriv->btcoexist.bt_rssi_state = 0xff;
 	}
 }
 
 void rtl8192ce_read_bt_coexist_info_from_hwpg( struct ieee80211_hw *hw,
 					      bool auto_load_fail, u8 *hwinfo )
 {
-	struct rtl_pci_priv *rtlpcipriv = rtl_pcipriv( hw );
+	struct rtl_priv *rtlpriv = rtl_priv( hw );
 	u8 val;
 
 	if ( !auto_load_fail ) {
-		rtlpcipriv->bt_coexist.eeprom_bt_coexist =
+		rtlpriv->btcoexist.eeprom_bt_coexist =
 					( ( hwinfo[RF_OPTION1] & 0xe0 ) >> 5 );
 		val = hwinfo[RF_OPTION4];
-		rtlpcipriv->bt_coexist.eeprom_bt_type = ( ( val & 0xe ) >> 1 );
-		rtlpcipriv->bt_coexist.eeprom_bt_ant_num = ( val & 0x1 );
-		rtlpcipriv->bt_coexist.eeprom_bt_ant_isol = ( ( val & 0x10 ) >> 4 );
-		rtlpcipriv->bt_coexist.eeprom_bt_radio_shared =
+		rtlpriv->btcoexist.eeprom_bt_type = ( ( val & 0xe ) >> 1 );
+		rtlpriv->btcoexist.eeprom_bt_ant_num = ( val & 0x1 );
+		rtlpriv->btcoexist.eeprom_bt_ant_isol = ( ( val & 0x10 ) >> 4 );
+		rtlpriv->btcoexist.eeprom_bt_radio_shared =
 							 ( ( val & 0x20 ) >> 5 );
 	} else {
-		rtlpcipriv->bt_coexist.eeprom_bt_coexist = 0;
-		rtlpcipriv->bt_coexist.eeprom_bt_type = BT_2WIRE;
-		rtlpcipriv->bt_coexist.eeprom_bt_ant_num = ANT_X2;
-		rtlpcipriv->bt_coexist.eeprom_bt_ant_isol = 0;
-		rtlpcipriv->bt_coexist.eeprom_bt_radio_shared = BT_RADIO_SHARED;
+		rtlpriv->btcoexist.eeprom_bt_coexist = 0;
+		rtlpriv->btcoexist.eeprom_bt_type = BT_2WIRE;
+		rtlpriv->btcoexist.eeprom_bt_ant_num = ANT_X2;
+		rtlpriv->btcoexist.eeprom_bt_ant_isol = 0;
+		rtlpriv->btcoexist.eeprom_bt_radio_shared = BT_RADIO_SHARED;
 	}
 
 	rtl8192ce_bt_var_init( hw );
@@ -2371,14 +2298,14 @@ void rtl8192ce_read_bt_coexist_info_from_hwpg( struct ieee80211_hw *hw,
 
 void rtl8192ce_bt_reg_init( struct ieee80211_hw *hw )
 {
-	struct rtl_pci_priv *rtlpcipriv = rtl_pcipriv( hw );
+	struct rtl_priv *rtlpriv = rtl_priv( hw );
 
 	/* 0:Low, 1:High, 2:From Efuse. */
-	rtlpcipriv->bt_coexist.reg_bt_iso = 2;
+	rtlpriv->btcoexist.reg_bt_iso = 2;
 	/* 0:Idle, 1:None-SCO, 2:SCO, 3:From Counter. */
-	rtlpcipriv->bt_coexist.reg_bt_sco = 3;
+	rtlpriv->btcoexist.reg_bt_sco = 3;
 	/* 0:Disable BT control A-MPDU, 1:Enable BT control A-MPDU. */
-	rtlpcipriv->bt_coexist.reg_bt_sco = 0;
+	rtlpriv->btcoexist.reg_bt_sco = 0;
 }
 
 
@@ -2386,23 +2313,22 @@ void rtl8192ce_bt_hw_init( struct ieee80211_hw *hw )
 {
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
 	struct rtl_phy *rtlphy = &( rtlpriv->phy );
-	struct rtl_pci_priv *rtlpcipriv = rtl_pcipriv( hw );
 
 	u8 u1_tmp;
 
-	if ( rtlpcipriv->bt_coexist.bt_coexistence &&
-	    ( ( rtlpcipriv->bt_coexist.bt_coexist_type == BT_CSR_BC4 ) ||
-	      rtlpcipriv->bt_coexist.bt_coexist_type == BT_CSR_BC8 ) ) {
+	if ( rtlpriv->btcoexist.bt_coexistence &&
+	    ( ( rtlpriv->btcoexist.bt_coexist_type == BT_CSR_BC4 ) ||
+	      rtlpriv->btcoexist.bt_coexist_type == BT_CSR_BC8 ) ) {
 
-		if ( rtlpcipriv->bt_coexist.bt_ant_isolation )
+		if ( rtlpriv->btcoexist.bt_ant_isolation )
 			rtl_write_byte( rtlpriv, REG_GPIO_MUXCFG, 0xa0 );
 
 		u1_tmp = rtl_read_byte( rtlpriv, 0x4fd ) &
 			 BIT_OFFSET_LEN_MASK_32( 0, 1 );
 		u1_tmp = u1_tmp |
-			 ( ( rtlpcipriv->bt_coexist.bt_ant_isolation == 1 ) ?
+			 ( ( rtlpriv->btcoexist.bt_ant_isolation == 1 ) ?
 			 0 : BIT_OFFSET_LEN_MASK_32( 1, 1 ) ) |
-			 ( ( rtlpcipriv->bt_coexist.bt_service == BT_SCO ) ?
+			 ( ( rtlpriv->btcoexist.bt_service == BT_SCO ) ?
 			 0 : BIT_OFFSET_LEN_MASK_32( 2, 1 ) );
 		rtl_write_byte( rtlpriv, 0x4fd, u1_tmp );
 

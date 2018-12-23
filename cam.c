@@ -11,10 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -33,10 +29,9 @@
  * Larry Finger <Larry.Finger@lwfinger.net>
  *
  *****************************************************************************/
-
-#include <linux/export.h>
 #include "wifi.h"
 #include "cam.h"
+#include <linux/export.h>
 
 void rtl_cam_reset_sec_info( struct ieee80211_hw *hw )
 {
@@ -57,12 +52,13 @@ static void rtl_cam_program_entry( struct ieee80211_hw *hw, u32 entry_no,
 
 	u32 target_command;
 	u32 target_content = 0;
-	u8 entry_i;
+	int entry_i;
 
-	RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD, "key_cont_128: %6phC\n",
-		 key_cont_128 );
+	RT_PRINT_DATA( rtlpriv, COMP_SEC, DBG_DMESG, "Key content :",
+		      key_cont_128, 16 );
 
-	for ( entry_i = 0; entry_i < CAM_CONTENT_COUNT; entry_i++ ) {
+	/* 0-1 config + mac, 2-5 fill 128key,6-7 are reserved */
+	for ( entry_i = CAM_CONTENT_COUNT - 1; entry_i >= 0; entry_i-- ) {
 		target_command = entry_i + CAM_CONTENT_COUNT * entry_no;
 		target_command = target_command | BIT( 31 ) | BIT( 16 );
 
@@ -75,11 +71,13 @@ static void rtl_cam_program_entry( struct ieee80211_hw *hw, u32 entry_no,
 			rtl_write_dword( rtlpriv, rtlpriv->cfg->maps[RWCAM],
 					target_command );
 
-			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD, "WRITE %x: %x\n",
+			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
+				 "WRITE %x: %x\n",
 				 rtlpriv->cfg->maps[WCAMI], target_content );
 			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
 				 "The Key ID is %d\n", entry_no );
-			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD, "WRITE %x: %x\n",
+			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
+				 "WRITE %x: %x\n",
 				 rtlpriv->cfg->maps[RWCAM], target_command );
 
 		} else if ( entry_i == 1 ) {
@@ -94,10 +92,10 @@ static void rtl_cam_program_entry( struct ieee80211_hw *hw, u32 entry_no,
 			rtl_write_dword( rtlpriv, rtlpriv->cfg->maps[RWCAM],
 					target_command );
 
-			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD, "WRITE A4: %x\n",
-				 target_content );
-			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD, "WRITE A0: %x\n",
-				 target_command );
+			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
+				 "WRITE A4: %x\n", target_content );
+			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
+				 "WRITE A0: %x\n", target_command );
 
 		} else {
 
@@ -112,17 +110,16 @@ static void rtl_cam_program_entry( struct ieee80211_hw *hw, u32 entry_no,
 					target_content );
 			rtl_write_dword( rtlpriv, rtlpriv->cfg->maps[RWCAM],
 					target_command );
-			udelay( 100 );
 
-			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD, "WRITE A4: %x\n",
-				 target_content );
-			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD, "WRITE A0: %x\n",
-				 target_command );
+			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
+				 "WRITE A4: %x\n", target_content );
+			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
+				 "WRITE A0: %x\n", target_command );
 		}
 	}
 
-	RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD, "after set key, usconfig:%x\n",
-		 us_config );
+	RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
+		 "after set key, usconfig:%x\n", us_config );
 }
 
 u8 rtl_cam_add_one_entry( struct ieee80211_hw *hw, u8 *mac_addr,
@@ -132,27 +129,26 @@ u8 rtl_cam_add_one_entry( struct ieee80211_hw *hw, u8 *mac_addr,
 	u32 us_config;
 	struct rtl_priv *rtlpriv = rtl_priv( hw );
 
-	RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
+	RT_TRACE( rtlpriv, COMP_SEC, DBG_DMESG,
 		 "EntryNo:%x, ulKeyId=%x, ulEncAlg=%x, ulUseDK=%x MacAddr %pM\n",
 		 ul_entry_idx, ul_key_id, ul_enc_alg,
 		 ul_default_key, mac_addr );
 
 	if ( ul_key_id == TOTAL_CAM_ENTRY ) {
 		RT_TRACE( rtlpriv, COMP_ERR, DBG_WARNING,
-			 "<=== ulKeyId exceed!\n" );
+			 "ulKeyId exceed!\n" );
 		return 0;
 	}
 
-	if ( ul_default_key == 1 ) {
+	if ( ul_default_key == 1 )
 		us_config = CFG_VALID | ( ( u16 ) ( ul_enc_alg ) << 2 );
-	} else {
+	else
 		us_config = CFG_VALID | ( ( ul_enc_alg ) << 2 ) | ul_key_id;
-	}
 
 	rtl_cam_program_entry( hw, ul_entry_idx, mac_addr,
-			      key_content, us_config );
+			      ( u8 * )key_content, us_config );
 
-	RT_TRACE( rtlpriv, COMP_SEC, DBG_DMESG, "<===\n" );
+	RT_TRACE( rtlpriv, COMP_SEC, DBG_DMESG, "end\n" );
 
 	return 1;
 
@@ -296,7 +292,7 @@ u8 rtl_cam_get_free_entry( struct ieee80211_hw *hw, u8 *sta_addr )
 	u8 i, *addr;
 
 	if ( NULL == sta_addr ) {
-		RT_TRACE( rtlpriv, COMP_SEC, DBG_EMERG, "sta_addr is NULL\n" );
+		pr_err( "sta_addr is NULL.\n" );
 		return TOTAL_CAM_ENTRY;
 	}
 	/* Does STA already exist? */
@@ -308,9 +304,8 @@ u8 rtl_cam_get_free_entry( struct ieee80211_hw *hw, u8 *sta_addr )
 	/* Get a free CAM entry. */
 	for ( entry_idx = 4; entry_idx < TOTAL_CAM_ENTRY; entry_idx++ ) {
 		if ( ( bitmap & BIT( 0 ) ) == 0 ) {
-			RT_TRACE( rtlpriv, COMP_SEC, DBG_EMERG,
-				 "-----hwsec_cam_bitmap: 0x%x entry_idx=%d\n",
-				 rtlpriv->sec.hwsec_cam_bitmap, entry_idx );
+			pr_err( "-----hwsec_cam_bitmap: 0x%x entry_idx=%d\n",
+			       rtlpriv->sec.hwsec_cam_bitmap, entry_idx );
 			rtlpriv->sec.hwsec_cam_bitmap |= BIT( 0 ) << entry_idx;
 			memcpy( rtlpriv->sec.hwsec_cam_sta_addr[entry_idx],
 			       sta_addr, ETH_ALEN );
@@ -329,12 +324,12 @@ void rtl_cam_del_entry( struct ieee80211_hw *hw, u8 *sta_addr )
 	u8 i, *addr;
 
 	if ( NULL == sta_addr ) {
-		RT_TRACE( rtlpriv, COMP_SEC, DBG_EMERG, "sta_addr is NULL\n" );
+		pr_err( "sta_addr is NULL.\n" );
+		return;
 	}
 
 	if ( is_zero_ether_addr( sta_addr ) ) {
-		RT_TRACE( rtlpriv, COMP_SEC, DBG_EMERG,
-			 "sta_addr is %pM\n", sta_addr );
+		pr_err( "sta_addr is %pM\n", sta_addr );
 		return;
 	}
 	/* Does STA already exist? */
@@ -346,8 +341,8 @@ void rtl_cam_del_entry( struct ieee80211_hw *hw, u8 *sta_addr )
 			/* Remove from HW Security CAM */
 			eth_zero_addr( rtlpriv->sec.hwsec_cam_sta_addr[i] );
 			rtlpriv->sec.hwsec_cam_bitmap &= ~( BIT( 0 ) << i );
-			RT_TRACE( rtlpriv, COMP_SEC, DBG_LOUD,
-				 "del CAM entry %d\n", i );
+			RT_TRACE( rtlpriv, COMP_SEC, DBG_DMESG,
+				 "&&&&&&&&&del entry %d\n", i );
 		}
 	}
 	return;

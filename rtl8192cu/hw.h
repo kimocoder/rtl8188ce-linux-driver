@@ -11,10 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -39,8 +35,6 @@
 
 #define H2C_RA_MASK	6
 
-#define LLT_POLLING_LLT_THRESHOLD		20
-#define LLT_POLLING_READY_TIMEOUT_COUNT		100
 #define LLT_LAST_ENTRY_OF_TX_PKT_BUFFER		255
 
 #define RX_PAGE_SIZE_REG_VALUE			PBP_128
@@ -111,13 +105,12 @@ bool rtl92cu_gpio_radio_on_off_checking( struct ieee80211_hw *hw, u8 * valid );
 void rtl92cu_set_check_bssid( struct ieee80211_hw *hw, bool check_bssid );
 int rtl92c_download_fw( struct ieee80211_hw *hw );
 void rtl92c_set_fw_pwrmode_cmd( struct ieee80211_hw *hw, u8 mode );
-void rtl92c_set_fw_rsvdpagepkt( struct ieee80211_hw *hw, bool dl_finished );
 void rtl92c_set_fw_joinbss_report_cmd( struct ieee80211_hw *hw, u8 mstatus );
 void rtl92c_fill_h2c_cmd( struct ieee80211_hw *hw,
 			 u8 element_id, u32 cmd_len, u8 *p_cmdbuffer );
 bool rtl92cu_phy_mac_config( struct ieee80211_hw *hw );
 void rtl92cu_update_hal_rate_tbl( struct ieee80211_hw *hw,
 				 struct ieee80211_sta *sta,
-				 u8 rssi_level );
+				 u8 rssi_level, bool update_bw );
 
 #endif

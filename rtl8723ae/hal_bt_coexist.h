@@ -11,10 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -60,8 +56,8 @@
 #define BT_COEX_STATE_WIFI_LEGACY		BIT( 3 )
 
 #define BT_COEX_STATE_WIFI_RSSI_LOW		BIT( 4 )
-#define BT_COEX_STATE_WIFI_RSSI_MEDIUM		BIT( 5 )
-#define BT_COEX_STATE_WIFI_RSSI_HIGH		BIT( 6 )
+#define BT_COEX_STATE_WIFI_RSSI_MEDIUM	BIT( 5 )
+#define BT_COEX_STATE_WIFI_RSSI_HIGH	BIT( 6 )
 #define BT_COEX_STATE_DEC_BT_POWER		BIT( 7 )
 
 #define BT_COEX_STATE_WIFI_IDLE			BIT( 8 )
@@ -85,7 +81,7 @@
 #define BT_COEX_STATE_WIFI_RSSI_1_MEDIUM	BIT( 25 )
 #define BT_COEX_STATE_WIFI_RSSI_1_HIGH		BIT( 26 )
 
-#define BT_COEX_STATE_BTINFO_COMMON		BIT( 30 )
+#define BT_COEX_STATE_BTINFO_COMMON			BIT( 30 )
 #define BT_COEX_STATE_BTINFO_B_HID_SCOESCO	BIT( 31 )
 #define BT_COEX_STATE_BTINFO_B_FTP_A2DP		BIT( 29 )
 
@@ -140,28 +136,26 @@
 #define	BTINFO_B_SCO_ESCO			BIT( 1 )
 #define	BTINFO_B_CONNECTION			BIT( 0 )
 
+void rtl8723e_btdm_coex_all_off( struct ieee80211_hw *hw );
+void rtl8723e_dm_bt_fw_coex_all_off( struct ieee80211_hw *hw );
 
-void rtl8723ae_btdm_coex_all_off( struct ieee80211_hw *hw );
-void rtl8723ae_dm_bt_fw_coex_all_off( struct ieee80211_hw *hw );
-
-void rtl8723ae_dm_bt_sw_coex_all_off( struct ieee80211_hw *hw );
-void rtl8723ae_dm_bt_hw_coex_all_off( struct ieee80211_hw *hw );
-long rtl8723ae_dm_bt_get_rx_ss( struct ieee80211_hw *hw );
-void rtl8723ae_dm_bt_balance( struct ieee80211_hw *hw,
+void rtl8723e_dm_bt_sw_coex_all_off( struct ieee80211_hw *hw );
+void rtl8723e_dm_bt_hw_coex_all_off( struct ieee80211_hw *hw );
+long rtl8723e_dm_bt_get_rx_ss( struct ieee80211_hw *hw );
+void rtl8723e_dm_bt_balance( struct ieee80211_hw *hw,
 			    bool balance_on, u8 ms0, u8 ms1 );
-void rtl8723ae_dm_bt_agc_table( struct ieee80211_hw *hw, u8 type );
-void rtl8723ae_dm_bt_bback_off_level( struct ieee80211_hw *hw, u8 type );
-u8 rtl8723ae_dm_bt_check_coex_rssi_state( struct ieee80211_hw *hw,
+void rtl8723e_dm_bt_agc_table( struct ieee80211_hw *hw, u8 tyep );
+void rtl8723e_dm_bt_bb_back_off_level( struct ieee80211_hw *hw, u8 type );
+u8 rtl8723e_dm_bt_check_coex_rssi_state( struct ieee80211_hw *hw,
 					u8 level_num, u8 rssi_thresh,
 					u8 rssi_thresh1 );
-u8 rtl8723ae_dm_bt_check_coex_rssi_state1( struct ieee80211_hw *hw,
-					 u8  level_num, u8 rssi_thresh,
+u8 rtl8723e_dm_bt_check_coex_rssi_state1( struct ieee80211_hw *hw,
+					 u8 level_num, u8 rssi_thresh,
 					 u8 rssi_thresh1 );
 void _rtl8723_dm_bt_check_wifi_state( struct ieee80211_hw *hw );
-void rtl8723ae_dm_bt_reject_ap_aggregated_packet( struct ieee80211_hw *hw,
-						bool reject );
-
-bool rtl8723ae_dm_bt_is_coexist_state_changed( struct ieee80211_hw *hw );
-bool rtl8723ae_dm_bt_is_wifi_up_link( struct ieee80211_hw *hw );
+void rtl8723e_dm_bt_reject_ap_aggregated_packet( struct ieee80211_hw *hw,
+						bool b_reject );
+bool rtl8723e_dm_bt_is_coexist_state_changed( struct ieee80211_hw *hw );
+bool rtl8723e_dm_bt_is_wifi_up_link( struct ieee80211_hw *hw );
 
 #endif

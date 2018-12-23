@@ -38,30 +38,61 @@ inGitRepo ()
     done
 }
 
-runningFedora () 
-{ 
-    lsb_release -d | grep --color=auto "Fedora" > /dev/null
+runningFedora ()
+{
+    if $(which lsb_release >/dev/null 2>&1); then
+        lsb_release -d | grep --color=auto "Fedora" > /dev/null
+    else
+        uname -r | grep --color=auto "fc" > /dev/null
+    fi
 }
 
-runningUbuntu () 
-{ 
-    lsb_release -d | grep --color=auto "Ubuntu" > /dev/null
+runningUbuntu ()
+{
+    if $(which lsb_release >/dev/null 2>&1); then
+        lsb_release -d | grep --color=auto "Ubuntu" > /dev/null
+    else
+        uname -a | grep --color=auto "Ubuntu" > /dev/null
+    fi
 }
 
 runningArch ()
 {
-    uname -a | grep --color=auto "ARCH" > /dev/null
+    if $(which lsb_release >/dev/null 2>&1); then
+        lsb_release -d | grep --color=auto "Arch" > /dev/null
+    else
+        uname -a | grep --color=auto "ARCH" > /dev/null
+    fi
 }
 
 runningMint ()
 {
-    lsb_release -d | grep --color=auto "Mint" > /dev/null
+    if $(which lsb_release >/dev/null 2>&1); then
+        lsb_release -d | grep --color=auto "Mint" > /dev/null
+    else
+        uname -a | grep --color=auto "Ubuntu" > /dev/null
+    fi
+}
+
+runningMint171 ()
+{
+    lsb_release -d | grep --color=auto "Rebecca" > /dev/null
 }
 
 # Derivatives like Mint and Elementary usually run the Ubuntu kernel so this can be an easy way to detect an Ubuntu derivative
 runningUbuntuKernel ()
 {
     uname -a | grep --color=auto "Ubuntu" > /dev/null
+}
+
+runningKernelLibre ()
+{
+    uname -r | grep --color=auto "libre" > /dev/null
+}
+
+hasDnf ()
+{
+    which dnf > /dev/null 2>&1
 }
 
 installBuildDependencies ()
@@ -72,10 +103,15 @@ installBuildDependencies ()
     fi
 
     if runningFedora; then
-        sudo yum -y install kernel-devel kernel-headers
-        sudo yum -y groupinstall "Development Tools"
-        sudo yum -y groupinstall "C Development Tools and Libraries"
-        sudo yum -y install git
+        hasDnf && PKGMAN='dnf' || PKGMAN='yum'
+        if runningKernelLibre; then
+            sudo $PKGMAN -y install kernel-libre-devel kernel-libre-headers
+        else
+            sudo $PKGMAN -y install kernel-devel kernel-headers
+        fi
+        sudo $PKGMAN -y groupinstall "Development Tools"
+        sudo $PKGMAN -y groupinstall "C Development Tools and Libraries"
+        sudo $PKGMAN -y install git
         return $?
     elif runningArch; then
         sudo pacman -S --noconfirm --needed git
@@ -83,7 +119,10 @@ installBuildDependencies ()
         sudo pacman -S --noconfirm --needed base-devel
         return $?
     elif runningUbuntu || runningUbuntuKernel; then
-        sudo apt-get -y install gcc build-essential linux-headers-generic linux-headers-$(uname -r)
+        LHG=''; LHUR=''
+        $(sudo dpkg -s linux-headers-generic >/dev/null 2>&1) && LHG="linux-headers-generic"
+        $(sudo dpkg -s linux-headers-$(uname -r) >/dev/null 2>&1) && LHUR="linux-headers-$(uname -r)"
+        sudo apt-get -y install gcc build-essential $LHG $LHUR
         sudo apt-get -y install git
         return $?
     else
@@ -92,7 +131,7 @@ installBuildDependencies ()
     fi
 }
 
-makeModuleLoadPersistent () 
+makeModuleLoadPersistent ()
 {
     if runningFedora; then
         file="/etc/rc.modules"
@@ -105,17 +144,21 @@ makeModuleLoadPersistent ()
         return 1
     fi
 
-    not_present=1
+    not_present="1"
     if [ -f "$file" ]; then
         while read line; do
             if $(echo "$line" | grep "rtl8192ce" > /dev/null); then
-                not_present=0
+                not_present="0"
             fi
         done < "$file"
     fi
 
-    if (( $not_present )); then
-        echo "rtl8192ce" >> "$file"
+    if [ "$not_present" = "1" ]; then
+        if [ "$(id -u)" = "0" ]; then
+            echo "rtl8192ce" >> "$file"
+        else
+            sudo sh -c "echo 'rtl8192ce' >> $file"
+        fi
     fi
 }
 
@@ -184,11 +227,130 @@ runningStockRtl8192ce  ()
     runningAnyRtl8192ce && ! runningOurRtl8192ce
 }
 
-usingSystemd () 
+usingSystemd ()
 {
     which systemctl > /dev/null 2>&1
 }
 
+runningAnyRtl8188ee ()
+{
+    lsmod | grep "rtl8188ee" > /dev/null
+}
+
+runningOurRtl8188ee ()
+{
+    modinfo rtl8188ee | grep "Benjamin Porter" > /dev/null
+}
+
+runningStockRtl8188ee ()
+{
+    runningAnyRtl8188ee && ! runningOurRtl8188ee
+}
+
+runningAnyRtl8192cu ()
+{
+    lsmod | grep "rtl8192cu" > /dev/null
+}
+
+runningOurRtl8192cu ()
+{
+    modinfo rtl8192cu | grep "Benjamin Porter" > /dev/null
+}
+
+runningStockRtl8192cu ()
+{
+    runningAnyRtl8192cu && ! runningOurRtl8192cu
+}
+
+runningAnyRtl8192de ()
+{
+    lsmod | grep "rtl8192de" > /dev/null
+}
+
+runningOurRtl8192de ()
+{
+    modinfo rtl8192de | grep "Benjamin Porter" > /dev/null
+}
+
+runningStockRtl8192de ()
+{
+    runningAnyRtl8192de && ! runningOurRtl8192de
+}
+
+runningAnyRtl8192ee ()
+{
+    lsmod | grep "rtl8192ee" > /dev/null
+}
+
+runningOurRtl8192ee ()
+{
+    modinfo rtl8192ee | grep "Benjamin Porter" > /dev/null
+}
+
+runningStockRtl8192ee ()
+{
+    runningAnyRtl8192ee && ! runningOurRtl8192ee
+}
+
+runningAnyRtl8192se ()
+{
+    lsmod | grep "rtl8192se" > /dev/null
+}
+
+runningOurRtl8192se ()
+{
+    modinfo rtl8192se | grep "Benjamin Porter" > /dev/null
+}
+
+runningStockRtl8192se ()
+{
+    runningAnyRtl8192se && ! runningOurRtl8192se
+}
+
+runningAnyRtl8723ae ()
+{
+    lsmod | grep "rtl8723ae" > /dev/null
+}
+
+runningOurRtl8723ae ()
+{
+    modinfo rtl8723ae | grep "Benjamin Porter" > /dev/null
+}
+
+runningStockRtl8723ae ()
+{
+    runningAnyRtl8723ae && ! runningOurRtl8723ae
+}
+
+runningAnyRtl8723be ()
+{
+    lsmod | grep "rtl8723be" > /dev/null
+}
+
+runningOurRtl8723be ()
+{
+    modinfo rtl8723be | grep "Benjamin Porter" > /dev/null
+}
+
+runningStockRtl8723be ()
+{
+    runningAnyRtl8723be && ! runningOurRtl8723be
+}
+
+runningAnyRtl8821ae ()
+{
+    lsmod | grep "rtl8821ae" > /dev/null
+}
+
+runningOurRtl8821ae ()
+{
+    modinfo rtl8821ae | grep "Benjamin Porter" > /dev/null
+}
+
+runningStockRtl8821ae ()
+{
+    runningAnyRtl8821ae && ! runningOurRtl8821ae
+}
 
 readonly rtlwifi_orig="/lib/modules/$(uname -r)/kernel/drivers/net/wireless/rtlwifi"
 readonly rtlwifi_backup_dir="$HOME/.rtlwifi-backup"
@@ -197,14 +359,16 @@ readonly rtlwifi_backup_outfile="$rtlwifi_backup_dir/$(uname -r).tar.gz"
 askbackup ()
 {
     if [ -f "$rtlwifi_backup_outfile" ]; then
-        echo "You already have a backup of a driver from this kernel version (located at ${rtlwifi_backup_outfile}.\n\nYou can back it up again, however if you have installed this driver already, then backing it up again will overwrite the original backup (which contains the stock drivers) with one that contains these drivers, which is most likely NOT what you want.  I recommend you only proceed with backing up the current drivers if you are sure of what you're doing."
+        echo -e "You already have a backup of a driver from this kernel version (located at ${rtlwifi_backup_outfile}.\n\nYou can back it up again, however if you have installed this driver already, then backing it up again will overwrite the original backup (which contains the stock drivers) with one that contains these drivers, which is most likely NOT what you want.  I recommend you only proceed with backing up the current drivers if you are sure of what you're doing."
 
-        read -p "Make a backup of the existing stock driver before installing? (Y/N): " RESP
+        read -p "Make a backup of the existing stock driver before installing? (Y/[N]): " RESP
 
         if [ "$RESP" = "Y" -o "$RESP" = "y" ]; then
+            echo -e "${blue}Making backup...${restore}"
             rm -r "$rtlwifi_backup_outfile"
             backupCurrent -f
         else
+            echo -e "${blue}Not making backup...${restore}"
             # We're not exiting with error since the user declined the backup
             return 0
         fi

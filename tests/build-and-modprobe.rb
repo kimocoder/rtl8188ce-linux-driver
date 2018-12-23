@@ -5,7 +5,7 @@
 
 require 'colorize'
 
-modstotest = %w{ rtl8192ce rtl8192cu rtl8188ee rtl8192de rtl8192se rtl8723ae rtl8723be rtl8723com }
+modstotest = %w{ rtl8188ee rtl8192ce rtl8192cu rtl8192de rtl8192ee rtl8192se rtl8723ae rtl8723be rtl8723com rtl8821ae }
 
 def die(message)
     puts "[ERROR]: ".light_red + message.red
@@ -30,12 +30,27 @@ unless File.exist?('functions.sh')
     die "This script must be run from the root directory"
 end
 
-puts "You should probably run this in a VM, because it will build, install, and modprobe the drivers for the current kernel version".yellow
+puts "You should not run this on a production machine! It will delete backups, build, install, and modprobe all the drivers for the current kernel version".yellow
 puts "Press enter to run the tests".yellow
 gets
 
+
+# Delete any backups by deleting the whole backup directory
+BACKUP_DIR = "#{Dir.home}/.rtlwifi-backup"
+BACKUP_FILE = "#{BACKUP_DIR}/#{%x{uname -r}.chomp}.tar.gz"
+system("rm -rf #{BACKUP_DIR}")
+
 system("yes 'y' | make") || die("Error building")
 system("yes 'y' | make install") || die("Error installing ")
+
+# Make sure the backups now exist
+unless Dir.exist? BACKUP_DIR
+  failure("backup", "The backup directory was not recreated by the build!")
+end
+
+unless File.exist? BACKUP_FILE
+  failure("backup", "The backup file was not created during the build")
+end
 
 modstotest.each do |mod|
     # First make sure it built and installed correctly
@@ -47,6 +62,7 @@ modstotest.each do |mod|
     end
 
     # Now modprobe and make sure it worked
+    # First unload all existing modules to make sure we are loading in ours
     if system("lsmod | grep '^rtl' >/dev/null")
         command = "lsmod | grep '^rtl' | awk '{print $1}' | xargs modprobe -r "
     else
@@ -69,10 +85,20 @@ modstotest.each do |mod|
         failure(mod, "Modprobe appeared to succeed but module did not show up in lsmod")
         next
     end
+
+    # Look for "Benjamin Porter" in the output of modinfo to make sure we can detect the new driver
+    unless system("modinfo #{mod} | grep 'Benjamin Porter' >/dev/null")
+        failure(mod, "New module will not be detected because Benamin Porter did not show up in modinfo")
+        next
+    end
+
+    # Now remove the module
+    system("modprobe -r #{mod}")
 end
 
 # Now print out results
 puts "Results:".yellow
+modstotest.insert(0, "backup")
 modstotest.each do |mod|
     result = $results[mod]
     puts "#{mod} - Status:  " + (result.empty? ? "Pass".green : "Fail".red)

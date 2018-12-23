@@ -11,10 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -45,6 +41,7 @@
 #include "dm.h"
 #include "mac.h"
 #include "trx.h"
+#include "../rtl8192c/fw_common.h"
 
 static int _ConfigVerTOutEP( struct ieee80211_hw *hw )
 {
@@ -251,7 +248,7 @@ u16 rtl8192cu_mq_to_hwq( __le16 fc, u16 mac80211_queue_index )
 		break;
 	default:
 		hw_queue_index = RTL_TXQ_BE;
-		RT_ASSERT( false, "QSLT_BE queue, skb_queue:%d\n",
+		WARN_ONCE( true, "rtl8192cu: QSLT_BE queue, skb_queue:%d\n",
 			  mac80211_queue_index );
 		break;
 	}
@@ -327,10 +324,11 @@ bool rtl92cu_rx_query_desc( struct ieee80211_hw *hw,
 	stats->rate = ( u8 ) GET_RX_DESC_RX_MCS( pdesc );
 	stats->shortpreamble = ( u16 ) GET_RX_DESC_SPLCP( pdesc );
 	stats->isampdu = ( bool ) ( GET_RX_DESC_PAGGR( pdesc ) == 1 );
-	stats->isampdu = ( bool ) ( ( GET_RX_DESC_PAGGR( pdesc ) == 1 )
+	stats->isfirst_ampdu = ( bool )( ( GET_RX_DESC_PAGGR( pdesc ) == 1 )
 				   && ( GET_RX_DESC_FAGGR( pdesc ) == 1 ) );
 	stats->timestamp_low = GET_RX_DESC_TSFL( pdesc );
 	stats->rx_is40Mhzpacket = ( bool ) GET_RX_DESC_BW( pdesc );
+	stats->is_ht = ( bool )GET_RX_DESC_RX_HT( pdesc );
 	rx_status->freq = hw->conf.chandef.chan->center_freq;
 	rx_status->band = hw->conf.chandef.chan->band;
 	if ( GET_RX_DESC_CRC32( pdesc ) )
@@ -338,16 +336,14 @@ bool rtl92cu_rx_query_desc( struct ieee80211_hw *hw,
 	if ( !GET_RX_DESC_SWDEC( pdesc ) )
 		rx_status->flag |= RX_FLAG_DECRYPTED;
 	if ( GET_RX_DESC_BW( pdesc ) )
-		rx_status->flag |= RX_FLAG_40MHZ;
+		rx_status->bw = RATE_INFO_BW_40;
 	if ( GET_RX_DESC_RX_HT( pdesc ) )
-		rx_status->flag |= RX_FLAG_HT;
+		rx_status->encoding = RX_ENC_HT;
 	rx_status->flag |= RX_FLAG_MACTIME_START;
 	if ( stats->decrypted )
 		rx_status->flag |= RX_FLAG_DECRYPTED;
-	rx_status->rate_idx = rtlwifi_rate_mapping( hw,
-					( bool )GET_RX_DESC_RX_HT( pdesc ),
-					( u8 )GET_RX_DESC_RX_MCS( pdesc ),
-					( bool )GET_RX_DESC_PAGGR( pdesc ) );
+	rx_status->rate_idx = rtlwifi_rate_mapping( hw, stats->is_ht,
+						   false, stats->rate );
 	rx_status->mactime = GET_RX_DESC_TSFL( pdesc );
 	if ( phystatus ) {
 		p_drvinfo = ( struct rx_fwinfo_92c * )( skb->data +
@@ -399,6 +395,7 @@ static void _rtl_rx_process( struct ieee80211_hw *hw, struct sk_buff *skb )
 				   && ( GET_RX_DESC_FAGGR( rxdesc ) == 1 ) );
 	stats.timestamp_low = GET_RX_DESC_TSFL( rxdesc );
 	stats.rx_is40Mhzpacket = ( bool ) GET_RX_DESC_BW( rxdesc );
+	stats.is_ht = ( bool )GET_RX_DESC_RX_HT( rxdesc );
 	/* TODO: is center_freq changed when doing scan? */
 	/* TODO: Shall we add protection or just skip those two step? */
 	rx_status->freq = hw->conf.chandef.chan->center_freq;
@@ -408,14 +405,12 @@ static void _rtl_rx_process( struct ieee80211_hw *hw, struct sk_buff *skb )
 	if ( !GET_RX_DESC_SWDEC( rxdesc ) )
 		rx_status->flag |= RX_FLAG_DECRYPTED;
 	if ( GET_RX_DESC_BW( rxdesc ) )
-		rx_status->flag |= RX_FLAG_40MHZ;
+		rx_status->bw = RATE_INFO_BW_40;
 	if ( GET_RX_DESC_RX_HT( rxdesc ) )
-		rx_status->flag |= RX_FLAG_HT;
+		rx_status->encoding = RX_ENC_HT;
 	/* Data rate */
-	rx_status->rate_idx = rtlwifi_rate_mapping( hw,
-					( bool )GET_RX_DESC_RX_HT( rxdesc ),
-					( u8 )GET_RX_DESC_RX_MCS( rxdesc ),
-					( bool )GET_RX_DESC_PAGGR( rxdesc ) );
+	rx_status->rate_idx = rtlwifi_rate_mapping( hw, stats.is_ht,
+						   false, stats.rate );
 	/*  There is a phy status after this rx descriptor. */
 	if ( GET_RX_DESC_PHY_STATUS( rxdesc ) ) {
 		p_drvinfo = ( struct rx_fwinfo_92c * )( rxdesc + RTL_RX_DESC_SIZE );
@@ -439,20 +434,12 @@ static void _rtl_rx_process( struct ieee80211_hw *hw, struct sk_buff *skb )
 		 ( u32 )hdr->addr1[0], ( u32 )hdr->addr1[1],
 		 ( u32 )hdr->addr1[2], ( u32 )hdr->addr1[3],
 		 ( u32 )hdr->addr1[4], ( u32 )hdr->addr1[5] );
-	memcpy( IEEE80211_SKB_RXCB( skb ), rx_status, sizeof( *rx_status ) );
 	ieee80211_rx( hw, skb );
 }
 
 void  rtl8192cu_rx_hdl( struct ieee80211_hw *hw, struct sk_buff * skb )
 {
 	_rtl_rx_process( hw, skb );
-}
-
-void rtl8192c_rx_segregate_hdl( 
-	struct ieee80211_hw *hw,
-	struct sk_buff *skb,
-	struct sk_buff_head *skb_list )
-{
 }
 
 /*----------------------------------------------------------------------
@@ -489,14 +476,14 @@ static void _rtl_fill_usb_tx_desc( u8 *txdesc )
  */
 static void _rtl_tx_desc_checksum( u8 *txdesc )
 {
-	u16 *ptr = ( u16 * )txdesc;
+	__le16 *ptr = ( __le16 * )txdesc;
 	u16	checksum = 0;
 	u32 index;
 
 	/* Clear first */
 	SET_TX_DESC_TX_DESC_CHECKSUM( txdesc, 0 );
 	for ( index = 0; index < 16; index++ )
-		checksum = checksum ^ ( *( ptr + index ) );
+		checksum = checksum ^ le16_to_cpu( *( ptr + index ) );
 	SET_TX_DESC_TX_DESC_CHECKSUM( txdesc, checksum );
 }
 
@@ -524,7 +511,7 @@ void rtl92cu_tx_fill_desc( struct ieee80211_hw *hw,
 
 	seq_number = ( le16_to_cpu( hdr->seq_ctrl ) & IEEE80211_SCTL_SEQ ) >> 4;
 	rtl_get_tcb_desc( hw, info, sta, skb, tcb_desc );
-	txdesc = ( u8 * )skb_push( skb, RTL_TX_HEADER_SIZE );
+	txdesc = skb_push( skb, RTL_TX_HEADER_SIZE );
 	memset( txdesc, 0, RTL_TX_HEADER_SIZE );
 	SET_TX_DESC_PKT_SIZE( txdesc, pktlen );
 	SET_TX_DESC_LINIP( txdesc, 0 );
@@ -551,7 +538,7 @@ void rtl92cu_tx_fill_desc( struct ieee80211_hw *hw,
 	SET_TX_DESC_RTS_BW( txdesc, 0 );
 	SET_TX_DESC_RTS_SC( txdesc, tcb_desc->rts_sc );
 	SET_TX_DESC_RTS_SHORT( txdesc,
-			      ( ( tcb_desc->rts_rate <= DESC92_RATE54M ) ?
+			      ( ( tcb_desc->rts_rate <= DESC_RATE54M ) ?
 			       ( tcb_desc->rts_use_shortpreamble ? 1 : 0 )
 			       : ( tcb_desc->rts_use_shortgi ? 1 : 0 ) ) );
 	if ( mac->bw_40 ) {
@@ -650,7 +637,7 @@ void rtl92cu_fill_fake_txdesc( struct ieee80211_hw *hw, u8 * pDesc,
 	}
 	SET_TX_DESC_USE_RATE( pDesc, 1 ); /* use data rate which is set by Sw */
 	SET_TX_DESC_OWN( pDesc, 1 );
-	SET_TX_DESC_TX_RATE( pDesc, DESC92_RATE1M );
+	SET_TX_DESC_TX_RATE( pDesc, DESC_RATE1M );
 	_rtl_tx_desc_checksum( pDesc );
 }
 
@@ -666,7 +653,7 @@ void rtl92cu_tx_fill_cmddesc( struct ieee80211_hw *hw,
 	memset( ( void * )pdesc, 0, RTL_TX_HEADER_SIZE );
 	if ( firstseg )
 		SET_TX_DESC_OFFSET( pdesc, RTL_TX_HEADER_SIZE );
-	SET_TX_DESC_TX_RATE( pdesc, DESC92_RATE1M );
+	SET_TX_DESC_TX_RATE( pdesc, DESC_RATE1M );
 	SET_TX_DESC_SEQ( pdesc, 0 );
 	SET_TX_DESC_LINIP( pdesc, 0 );
 	SET_TX_DESC_QUEUE_SEL( pdesc, fw_queue );
@@ -686,9 +673,4 @@ void rtl92cu_tx_fill_cmddesc( struct ieee80211_hw *hw,
 	}
 	RT_PRINT_DATA( rtlpriv, COMP_CMD, DBG_LOUD, "H2C Tx Cmd Content",
 		      pdesc, RTL_TX_DESC_SIZE );
-}
-
-bool rtl92cu_cmd_send_packet( struct ieee80211_hw *hw, struct sk_buff *skb )
-{
-	return true;
 }
